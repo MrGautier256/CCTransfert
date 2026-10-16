@@ -18,7 +18,10 @@ CCTransfert = "cctransfert.cli:main"
 cctransfert = "cctransfert.cli:main"
 
 [tool.setuptools]
-packages = ["cctransfert"]
+packages = ["cctransfert", "cctransfert.gui"]
+
+[tool.setuptools.package-data]
+"cctransfert.gui" = ["static/*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cctransfert.__version__" }

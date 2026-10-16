@@ -7,7 +7,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 from . import __version__
 from . import doctor as doctor_mod
@@ -16,10 +15,10 @@ from . import ui
 from .bundle import BundleError, BundleReader, encrypt_file
 from .exporter import default_name, export_session
 from .importer import (
-    ImportError_, ImportOptions, import_bundle, last_journal, recalled_mapping, remember_mapping,
-    undo, undo_check,
+    ImportError_, ImportOptions, import_bundle, last_journal, recalled_mapping, relocate_session,
+    remember_mapping, undo, undo_check,
 )
-from .profile import local_profile
+from .profile import find_claude, local_profile
 from .slug import MAX_SLUG, compute_slug
 from .store import (
     SDK_ENTRYPOINTS, find_session_files, iter_project_dirs, list_sessions, parse_ts, resolve_slug,
@@ -309,9 +308,9 @@ def _clean_env():
 
 def calibrate(profile, root):
     """Lance `claude -p "ok"` dans `root`, relève le slug créé, puis supprime la session de test."""
-    exe = shutil.which("claude")
+    exe = find_claude()[0]
     if not exe:
-        raise CliError("--calibrate : `claude` introuvable dans le PATH")
+        raise CliError("--calibrate : exécutable `claude` introuvable")
     existing_slugs = set(iter_project_dirs(profile))
     print("Calibration : lancement de `claude -p ok` dans {} (une petite requête API)…".format(root))
     sid = None
@@ -494,31 +493,41 @@ def cmd_undo(args):
 
 def cmd_relocate(args):
     profile = local_profile()
-    scope = list_sessions(profile)
-    info = find_by_selector(profile, args.session, scope)
-    if info.running:
-        raise CliError("la session {} est en cours (PID {}) : quittez-la avant de la déplacer.".format(
-            info.short_id, info.running.get("pid")))
+    info = find_by_selector(profile, args.session, list_sessions(profile))
     root = _prepare_root(args.to, args, profile.style)
-    if info.root and P.same_path(info.root, root, profile.style):
-        raise CliError("la session est déjà rattachée à {}".format(root))
     print("Déplacement de « {} » ({})\n  de {}\n  vers {}".format(
         ui.clip(info.display_title, 60), info.short_id, info.root, root))
-    tmpdir = tempfile.mkdtemp(prefix="cct-relocate-")
-    try:
-        tmp = os.path.join(tmpdir, "session.CCTransfert")
-        export_session(profile, info, tmp, with_memory=False, with_file_history=True, with_history=False)
-        opts = ImportOptions(root, maps=_parse_maps(args.map), new_id=False, replace=True,
-                             dry_run=args.dry_run, keep_mtime=args.keep_mtime, relocate=True)
-        res = import_bundle(tmp, profile, opts)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    res = relocate_session(profile, info, root, maps=_parse_maps(args.map), dry_run=args.dry_run,
+                           keep_mtime=args.keep_mtime)
     print_import_report(res, args.dry_run)
     if args.dry_run:
         print("\n(dry-run : rien n'a été écrit)")
         return 0
     print_final(res, profile.style, info.entrypoint)
     return 0
+
+
+def cmd_gui(args):
+    from .gui.server import install_shortcut, remove_shortcut, serve
+
+    if args.install_shortcut:
+        for p in install_shortcut(on_desktop=not args.no_desktop):
+            print("Icône créée : {}".format(p))
+        print("Cliquez dessus pour ouvrir CCTransfert (retrait : CCTransfert gui --remove-shortcut).")
+        return 0
+    if args.remove_shortcut:
+        removed = remove_shortcut()
+        for p in removed:
+            print("Supprimé : {}".format(p))
+        if not removed:
+            print("Aucune icône CCTransfert à retirer.")
+        return 0
+    preload = None
+    if args.bundle:
+        preload = os.path.abspath(os.path.expanduser(args.bundle))
+        if not os.path.isfile(preload):
+            raise CliError("fichier introuvable : {}".format(preload))
+    return serve(port=args.port, open_browser=not args.no_open, app_mode=not args.browser, preload=preload)
 
 
 def cmd_doctor(args):
@@ -561,6 +570,17 @@ def build_parser():
     p.add_argument("--version", action="version", version="CCTransfert " + __version__)
     p.add_argument("--config-dir", help="dossier de config de Claude Code (défaut : $CLAUDE_CONFIG_DIR ou ~/.claude)")
     sub = p.add_subparsers(dest="cmd", metavar="COMMANDE")
+
+    s = sub.add_parser("gui", help="ouvrir l'interface graphique (page locale dans une fenêtre)")
+    s.add_argument("bundle", nargs="?", help="fichier .CCTransfert à ouvrir directement dans l'onglet Importer")
+    s.add_argument("--port", type=int, default=0, help="port local (défaut : choisi automatiquement)")
+    s.add_argument("--no-open", action="store_true", help="ne pas ouvrir de fenêtre, afficher seulement l'adresse")
+    s.add_argument("--browser", action="store_true", help="ouvrir dans le navigateur par défaut (onglet) plutôt qu'en fenêtre")
+    s.add_argument("--install-shortcut", action="store_true",
+                   help="ajouter une icône CCTransfert au menu des applications et sur le bureau")
+    s.add_argument("--no-desktop", action="store_true", help="avec --install-shortcut : pas d'icône sur le bureau")
+    s.add_argument("--remove-shortcut", action="store_true", help="retirer les icônes CCTransfert")
+    s.set_defaults(func=cmd_gui)
 
     s = sub.add_parser("doctor", help="diagnostic de la machine (OS, WSL, config, slug du dossier courant…)")
     s.add_argument("--json", action="store_true", help="sortie JSON")

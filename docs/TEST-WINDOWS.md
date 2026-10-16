@@ -139,7 +139,30 @@ Sur Linux :
       - [ ] après import, `claude -r` montre la session avec le message échangé sous Windows.
 - [ ] `CCTransfert undo` restaure la version d'avant.
 
-## 6. Cas particuliers (si le temps le permet)
+## 6. Interface graphique
+
+- [ ] Dans l'Explorateur, **double-clic sur `CCTransfert.pyw`** (racine du dépôt) : l'interface
+      s'ouvre, sans fenêtre de console.
+- [ ] Glisser un fichier `.CCTransfert` sur `CCTransfert.pyw` : il s'ouvre dans l'onglet Importer.
+- [ ] Si rien ne s'ouvre : clic droit → « Ouvrir avec » → « Python » (ou `pythonw`), et
+      noter ce qui est associé aux `.pyw` ; regarder `%USERPROFILE%\.CCTransfert\gui.log`.
+- [ ] `CCTransfert gui` ouvre une fenêtre Edge (ou Chrome) sans barre d'adresse.
+- [ ] Onglet **Exporter** : les sessions Windows apparaissent, regroupées par projet ;
+      l'export crée le fichier dans `Téléchargements` ; « Ouvrir le dossier » ouvre
+      l'Explorateur sur le fichier.
+- [ ] Onglet **Importer** : glisser-déposer un `.CCTransfert` depuis l'Explorateur
+      fonctionne ; « Parcourir… » liste les lecteurs (`C:\`, `D:\`…).
+- [ ] Aperçu puis import d'un bundle venant de Linux : mêmes vérifications qu'au §2.
+- [ ] Fermer la fenêtre arrête bien `CCTransfert` : plus de processus `python` dans le
+      Gestionnaire des tâches après quelques secondes.
+- [ ] `CCTransfert gui --install-shortcut` crée « CCTransfert » dans le menu Démarrer
+      **et** sur le Bureau, avec l'icône CCTransfert (carré bleu, deux documents, flèche).
+- [ ] Un double-clic sur l'icône du Bureau ouvre l'interface **sans fenêtre de console**.
+- [ ] Un deuxième double-clic ouvre une deuxième fenêtre, sans lancer un deuxième
+      `pythonw.exe` (vérifier dans le Gestionnaire des tâches).
+- [ ] `CCTransfert gui --remove-shortcut` retire les deux raccourcis.
+
+## 7. Cas particuliers (si le temps le permet)
 
 - [ ] Projet sur un autre lecteur (`D:\Projets\X`) ou un lecteur réseau / `subst`.
       Noter le slug créé par Claude Code (`dir ~\.claude\projects`) et celui de

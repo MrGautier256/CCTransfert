@@ -177,20 +177,107 @@ def local_project_dir_name():
     return v if valid_project_dir_name(v) else None
 
 
-def claude_version(timeout=20):
-    """Version de Claude Code (`claude --version`), ou None."""
-    exe = shutil.which("claude")
+_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+
+
+def _known_claude_paths():
+    """Emplacements d'installation habituels de Claude Code (utile hors du PATH, ex. lancement
+    depuis une icône : la session graphique n'a souvent pas ~/.local/bin dans son PATH)."""
+    home = os.path.expanduser("~")
+    if host_os() == "windows":
+        appdata, local = os.environ.get("APPDATA", ""), os.environ.get("LOCALAPPDATA", "")
+        return [os.path.join(home, ".local", "bin", "claude.exe"),
+                os.path.join(home, ".claude", "local", "claude.exe"),
+                os.path.join(appdata, "npm", "claude.cmd") if appdata else "",
+                os.path.join(local, "Programs", "claude", "claude.exe") if local else ""]
+    return [os.path.join(home, ".local", "bin", "claude"), os.path.join(home, ".claude", "local", "claude"),
+            os.path.join(home, ".npm-global", "bin", "claude"), os.path.join(home, ".bun", "bin", "claude"),
+            os.path.join(home, ".volta", "bin", "claude"), "/usr/local/bin/claude", "/opt/homebrew/bin/claude"]
+
+
+def find_claude():
+    """(chemin, origine) de l'exécutable `claude` : d'abord le PATH, puis les emplacements standard."""
+    p = shutil.which("claude")
+    if p:
+        return p, "PATH"
+    for c in _known_claude_paths():
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c, "emplacement standard (hors du PATH)"
+    return None, None
+
+
+def claude_version(timeout=20, exe=None):
+    """Version de Claude Code, ou None. `claude --version`, sinon la cible du lien
+    (l'installateur natif pointe vers …/versions/X.Y.Z)."""
+    exe = exe or find_claude()[0]
     if not exe:
         return None
     try:
         out = subprocess.run(
             [exe, "--version"], capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
         ).stdout
+        m = _VERSION_RE.search(out or "")
+        if m:
+            return m.group(0)
     except (OSError, subprocess.SubprocessError):
+        pass
+    m = _VERSION_RE.fullmatch(os.path.basename(os.path.realpath(exe)))
+    return m.group(0) if m else None
+
+
+def claude_version_from_sessions(config_dir):
+    """Version de Claude Code vue dans les sessions les plus récentes (dernier recours)."""
+    from .store import read_head_tail
+
+    found = []
+    d = os.path.join(config_dir, "sessions")
+    try:
+        for n in os.listdir(d):
+            if n.endswith(".json"):
+                try:
+                    import json
+
+                    with open(os.path.join(d, n), encoding="utf-8") as f:
+                        v = json.load(f).get("version")
+                    if isinstance(v, str) and _VERSION_RE.fullmatch(v):
+                        found.append(v)
+                except (OSError, ValueError, AttributeError):
+                    pass
+    except OSError:
+        pass
+    if not found:
+        newest = []
+        pdir = os.path.join(config_dir, "projects")
+        try:
+            for slug in os.listdir(pdir):
+                sd = os.path.join(pdir, slug)
+                if os.path.isdir(sd):
+                    for n in os.listdir(sd):
+                        if n.endswith(".jsonl"):
+                            fp = os.path.join(sd, n)
+                            newest.append((os.path.getmtime(fp), fp))
+        except OSError:
+            pass
+        for _m, fp in sorted(newest, reverse=True)[:3]:
+            try:
+                _h, tail = read_head_tail(fp, head=1024, tail=64 * 1024)
+            except OSError:
+                continue
+            found += [o["version"] for o in tail if isinstance(o.get("version"), str) and _VERSION_RE.fullmatch(o["version"])]
+    if not found:
         return None
-    m = re.search(r"\d+\.\d+\.\d+", out or "")
-    return m.group(0) if m else (out or "").strip() or None
+    return max(found, key=lambda v: tuple(int(x) for x in v.split(".")))
+
+
+def claude_info(config_dir):
+    """Exécutable, version et provenance de la version de Claude Code."""
+    exe, where = find_claude()
+    v = claude_version(exe=exe) if exe else None
+    if v:
+        return {"exe": exe, "exe_source": where, "version": v, "version_source": "exécutable"}
+    v = claude_version_from_sessions(config_dir)
+    return {"exe": exe, "exe_source": where, "version": v, "version_source": "sessions" if v else None}
 
 
 def read_cleanup_days(config_dir):
@@ -224,7 +311,7 @@ def local_profile(with_claude_version=False):
         hostname=socket.gethostname() or platform.node(),
         user=user,
         wsl=detect_wsl(),
-        claude_version=claude_version() if with_claude_version else None,
+        claude_version=claude_info(config)["version"] if with_claude_version else None,
         project_dir_name=local_project_dir_name(),
         cwd=cwd,
         settings_cleanup_days=read_cleanup_days(config),

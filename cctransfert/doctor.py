@@ -8,7 +8,7 @@ import sys
 
 from . import __version__
 from . import paths as P
-from .profile import claude_version, node_tmpdir
+from .profile import claude_info, node_tmpdir
 from .slug import compute_slug, drive_case_of_slug, slug_matches
 from .store import head_cwd, iter_project_dirs, running_sessions, session_ids_in
 
@@ -28,9 +28,12 @@ def collect(profile):
     d["config_dir"] = profile.config_dir
     d["config_existe"] = os.path.isdir(profile.config_dir)
 
-    exe = shutil.which("claude")
+    ci = claude_info(profile.config_dir)
+    exe = ci["exe"]
     d["claude_exe"] = exe
-    d["claude_version"] = claude_version() if exe else None
+    d["claude_exe_source"] = ci["exe_source"]
+    d["claude_version"] = ci["version"]
+    d["claude_version_source"] = ci["version_source"]
     hints = []
     if profile.wsl and exe and exe.startswith("/mnt/"):
         hints.append("Le `claude` trouvé est celui de Windows ({}). Lancez CCTransfert dans le même "
@@ -43,7 +46,8 @@ def collect(profile):
     if profile.os == "windows" and shutil.which("wsl"):
         hints.append("WSL est installé : si vous utilisez Claude Code DANS WSL, lancez CCTransfert dans WSL.")
     if not exe:
-        hints.append("`claude` est introuvable dans le PATH.")
+        hints.append("Exécutable `claude` introuvable (ni dans le PATH ni aux emplacements standard)"
+                     + (" ; version déduite des sessions récentes." if ci["version"] else "."))
 
     # Dossier temp de Claude Code.
     base = os.environ.get("CLAUDE_CODE_TMPDIR") or node_tmpdir()
@@ -101,7 +105,11 @@ def render(d):
     if d["env"]:
         L.append("Variables      : " + ", ".join("{}={}".format(k, v) for k, v in d["env"].items()))
     L.append("Config Claude  : {}{}".format(d["config_dir"], "" if d["config_existe"] else "  (INTROUVABLE)"))
-    L.append("Claude Code    : {} ({})".format(d["claude_version"] or "?", d["claude_exe"] or "absent du PATH"))
+    where = d["claude_exe"] or "exécutable introuvable"
+    if d["claude_exe"] and d["claude_exe_source"] != "PATH":
+        where += ", hors du PATH"
+    vs = " (vue dans les sessions)" if d["claude_version_source"] == "sessions" else ""
+    L.append("Claude Code    : {}{} ({})".format(d["claude_version"] or "?", vs, where))
     L.append("Temp de Claude : {}".format(d["temp_root"]))
     L.append("  dossiers « claude* » dans {} : {}".format(d["temp_base"], ", ".join(d["temp_dossiers_claude"]) or "aucun"))
     L.append("Dossier courant: {}".format(d["cwd_realpath"]))

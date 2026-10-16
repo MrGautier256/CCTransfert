@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCTransfert</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-256.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><img src="icon.svg" alt="" width="22" height="22"><span>CCTransfert</span><span class="ver" id="ver"></span></div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="export" role="tab">Exporter</button>
+    <button class="tab" data-tab="import" role="tab">Importer</button>
+    <button class="tab" data-tab="history" role="tab">Historique</button>
+    <button class="tab" data-tab="doctor" role="tab">Diagnostic</button>
+  </nav>
+  <div class="machine" id="machine" title=""></div>
+  <button class="btn ghost small" id="quit" title="Arrêter CCTransfert et fermer">Quitter</button>
+</header>
+
+<div class="offline" id="offline" hidden>Le serveur CCTransfert est arrêté. Relancez <code>CCTransfert gui</code>.</div>
+
+<main>
+  <!-- Exporter -->
+  <section class="tabpanel active" id="tab-export">
+    <div class="export-layout">
+      <aside class="panel list-pane">
+        <div class="list-tools">
+          <input type="search" id="search" placeholder="Rechercher (titre, prompt, ID, dossier)…" autocomplete="off">
+          <select id="project"></select>
+        </div>
+        <div class="session-list" id="session-list"><div class="empty">Chargement des sessions…</div></div>
+        <div class="list-foot" id="list-foot"></div>
+      </aside>
+      <section class="panel detail-pane" id="detail">
+        <div class="empty big">
+          <div class="empty-icon">⇢</div>
+          <p>Choisissez une session à exporter.</p>
+          <p class="muted">Elle sera enregistrée dans un fichier <code>.CCTransfert</code> à copier sur l'autre machine (clé USB, scp, cloud…).</p>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- Importer -->
+  <section class="tabpanel" id="tab-import">
+    <div class="narrow">
+      <div class="dropzone" id="dropzone">
+        <div class="dz-icon">⇣</div>
+        <p class="dz-title">Déposez un fichier <code>.CCTransfert</code> ici</p>
+        <p class="muted">ou</p>
+        <div class="row center">
+          <button class="btn primary" id="pick-upload">Choisir un fichier…</button>
+          <button class="btn" id="pick-disk">Parcourir le disque…</button>
+        </div>
+        <input type="file" id="file-input" accept=".CCTransfert,.age,.gpg" hidden>
+      </div>
+      <div id="import-flow"></div>
+    </div>
+  </section>
+
+  <!-- Historique -->
+  <section class="tabpanel" id="tab-history">
+    <div class="narrow wide">
+      <div class="section-head">
+        <div>
+          <h2>Imports réalisés</h2>
+          <p class="muted">Chaque import garde une sauvegarde de ce qu'il a remplacé : le dernier peut être annulé.</p>
+        </div>
+        <button class="btn danger" id="undo-last">Annuler le dernier import</button>
+      </div>
+      <div id="journals" class="panel"></div>
+    </div>
+  </section>
+
+  <!-- Diagnostic -->
+  <section class="tabpanel" id="tab-doctor">
+    <div class="narrow wide" id="doctor"><div class="empty">Chargement…</div></div>
+  </section>
+</main>
+
+<!-- Choix d'un dossier ou d'un fichier sur le disque -->
+<dialog id="picker" class="modal picker">
+  <form method="dialog" class="modal-inner">
+    <header class="modal-head"><h3 id="picker-title">Choisir un dossier</h3><button class="icon-btn" value="cancel" aria-label="Fermer">✕</button></header>
+    <div class="picker-body">
+      <nav class="shortcuts" id="picker-shortcuts"></nav>
+      <div class="browser">
+        <div class="pathbar">
+          <button type="button" class="btn small" id="picker-up" title="Dossier parent">↑</button>
+          <input type="text" id="picker-path" spellcheck="false" autocomplete="off">
+        </div>
+        <ul class="entries" id="picker-entries"></ul>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <span class="muted small" id="picker-hint"></span>
+      <button class="btn" value="cancel">Annuler</button>
+      <button type="button" class="btn primary" id="picker-ok">Choisir ce dossier</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- Confirmation -->
+<dialog id="confirm" class="modal">
+  <form method="dialog" class="modal-inner">
+    <header class="modal-head"><h3 id="confirm-title"></h3></header>
+    <div class="modal-body" id="confirm-body"></div>
+    <footer class="modal-foot">
+      <button class="btn" value="no" id="confirm-no">Annuler</button>
+      <button class="btn primary" value="yes" id="confirm-yes">Confirmer</button>
+    </footer>
+  </form>
+</dialog>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

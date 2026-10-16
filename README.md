@@ -61,7 +61,72 @@ Vérification : `CCTransfert doctor`.
 
 ## Utilisation
 
-### Workflow type
+### Interface graphique
+
+**Le plus simple : le lanceur inclus dans le projet, `CCTransfert.pyw`** (à la racine du
+dépôt, aucune installation nécessaire).
+
+| Système | Comment l'ouvrir |
+|---|---|
+| Windows | **Double-clic** sur `CCTransfert.pyw` (pas de fenêtre de console). Glisser un fichier `.CCTransfert` dessus l'ouvre directement dans l'onglet Importer. Il faut Python de python.org, qui associe les `.pyw` à Python. |
+| Linux | **Clic droit → « Exécuter comme un programme »**, ou `./CCTransfert.pyw` dans un terminal. GNOME n'exécute rien par double-clic dans un dossier (choix de sécurité de GNOME) ; pour une icône en un clic, voir `--install-shortcut` ci-dessous. Les gestionnaires de fichiers KDE, Cinnamon et Xfce proposent de l'exécuter au double-clic. |
+
+Le lanceur démarre l'interface en arrière-plan puis rend la main. S'il y a un problème
+(mauvaise version de Python, dossier incomplet…), une boîte de dialogue l'explique.
+Journal : `~/.CCTransfert/gui.log`.
+
+En ligne de commande :
+
+```sh
+CCTransfert gui                          # ouvre la fenêtre
+CCTransfert gui fichier.CCTransfert      # ouvre directement ce fichier dans « Importer »
+CCTransfert gui --install-shortcut       # crée l'icône à cliquer (menu + bureau)
+CCTransfert gui --remove-shortcut        # retire ces icônes
+```
+
+**Icône à cliquer.** Lancez une fois `CCTransfert gui --install-shortcut`. Il crée :
+- sous Linux : une entrée « CCTransfert » dans le menu des applications et une icône sur
+  le bureau, déjà marquée « de confiance » pour le bureau GNOME. Pour l'avoir dans le
+  dock : clic droit sur l'application ouverte, puis « Épingler au dock » ;
+- sous Windows : un raccourci dans le menu Démarrer et un sur le Bureau, qui ouvrent
+  l'interface **sans fenêtre de console**.
+
+`--no-desktop` crée seulement l'entrée de menu.
+
+Cliquer une deuxième fois ne lance pas un deuxième serveur : une nouvelle fenêtre s'ouvre
+sur l'instance déjà lancée.
+
+L'interface s'ouvre dans une fenêtre dédiée, via Chrome, Edge ou Brave en mode
+application, ou à défaut dans un onglet du navigateur par défaut. Elle propose quatre
+onglets :
+
+- **Exporter** : les sessions de la machine, regroupées par projet, avec une recherche.
+  On choisit une session, ce qu'on inclut (rewind, mémoire, historique) et le dossier
+  de destination, puis on clique sur **Exporter**. Une session peut aussi être déplacée
+  vers un autre dossier de la même machine.
+- **Importer** : on dépose le fichier `.CCTransfert`, ou on le choisit. L'interface
+  propose ensuite :
+  - le dossier cible : celui mémorisé pour ce projet, ou un projet du même nom sur la
+    machine ;
+  - les options ;
+  - un **aperçu** de tout ce qui sera écrit, avec des exemples de réécriture avant/après.
+
+  En cas de conflit d'ID, elle propose de remplacer la session ou d'importer une copie.
+  À la fin, elle affiche les commandes `claude -r` à copier.
+- **Historique** : les imports réalisés ; on peut annuler le dernier.
+- **Diagnostic** : l'équivalent de `CCTransfert doctor`, avec la copie du JSON.
+
+L'interface est une page locale servie par CCTransfert :
+- elle écoute uniquement sur `127.0.0.1` et est protégée par un jeton aléatoire ;
+- elle s'ouvre dans un profil de navigateur dédié (`~/.CCTransfert/browser-profile`) :
+  vos extensions n'y ont pas accès ;
+- elle fonctionne sans aucune ressource externe et ne fait sortir aucune donnée ;
+- elle s'arrête toute seule quand on ferme la fenêtre (ou avec le bouton **Quitter**).
+
+Aucune dépendance n'est à installer, et `tkinter` n'est pas nécessaire. Toutes les
+commandes restent disponibles en ligne de commande.
+
+### Workflow type (ligne de commande)
 
 Sur le PC source, depuis le dossier du projet :
 
@@ -107,6 +172,7 @@ en cours.
 
 | Commande | Rôle |
 |---|---|
+| `gui [BUNDLE] [--browser] [--no-open] [--install-shortcut]` | Interface graphique (voir ci-dessus). |
 | `doctor [--json]` | Diagnostic : OS, WSL, dossier de config, version de Claude Code, dossier temp, slug du dossier courant, vérification de l'algorithme sur les dossiers existants, convention de lettre de lecteur. |
 | `list [--here \| --dir PATH \| --all]` | Sessions (N°, ID court, dernière activité, taille, titre, dossier). `●` = en cours, `[-p]` = créée par `claude -p` (absente du picker de Claude Code). |
 | `export [ID\|NOM\|N°] [--dir PATH\|--all] [--latest] [-o FICHIER\|DOSSIER] [--with-memory] [--with-history] [--no-file-history] [--encrypt]` | Crée le bundle. Sans argument : choix interactif dans les sessions du dossier courant (`t` = toutes). |
@@ -269,7 +335,8 @@ Les tests simulent des machines Linux et Windows dans des dossiers temporaires :
 - champs inconnus et lignes corrompues ;
 - `--new-id`, conflits, aller-retour A → B → A identique à l'octet ;
 - dry-run, undo, zip-slip, sha256 ;
-- parcours complet de la CLI.
+- parcours complet de la CLI ;
+- API de l'interface graphique : jeton, en-tête `Host`, export, import, conflits, undo.
 
 Organisation du code (`cctransfert/`) :
 
@@ -283,4 +350,5 @@ Organisation du code (`cctransfert/`) :
 | `store.py` | lecture des sessions |
 | `bundle.py` | format `.CCTransfert` |
 | `exporter.py`, `importer.py` | export, import, sauvegardes et undo |
-| `doctor.py`, `cli.py`, `ui.py` | diagnostic et interface |
+| `doctor.py`, `cli.py`, `ui.py` | diagnostic et ligne de commande |
+| `gui/server.py`, `gui/static/` | interface graphique : API JSON locale et page HTML/CSS/JS |

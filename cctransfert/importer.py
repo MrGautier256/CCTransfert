@@ -19,7 +19,15 @@ DEFAULT_CLEANUP_DAYS = 30
 
 
 class ImportError_(Exception):
-    """Erreur d'import présentée telle quelle à l'utilisateur."""
+    """Erreur d'import présentée telle quelle à l'utilisateur.
+
+    `code` permet à l'interface graphique de proposer la bonne action :
+    `conflict_same` (remplacer ?), `conflict_other` (déplacer ou nouvel ID ?), `running`.
+    """
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
 
 
 # -- dossier de l'outil (~/.CCTransfert) ----------------------------------------------
@@ -59,8 +67,9 @@ def recalled_mapping(source):
 
 class ImportOptions:
     def __init__(self, target_root, maps=(), new_id=False, replace=False, dry_run=False,
-                 keep_mtime=False, confirm=None, now=None, relocate=False, slug_override=None):
+                 keep_mtime=False, confirm=None, now=None, relocate=False, slug_override=None, forced_sid=None):
         self.target_root = target_root
+        self.forced_sid = forced_sid  # avec new_id : réutilise l'ID montré par l'aperçu
         self.slug_override = slug_override  # slug observé par --calibrate
         self.maps = list(maps)
         self.new_id = new_id
@@ -273,7 +282,7 @@ def _import(rd, bundle_path, target, opts, res):
     src = m["source"]
     old = m["session"]["id"]
     res.old_sid = old
-    new = str(uuid.uuid4()) if opts.new_id else old
+    new = (opts.forced_sid or str(uuid.uuid4())) if opts.new_id else old
     res.new_sid = new
     sty = target.style
 
@@ -294,7 +303,8 @@ def _import(rd, bundle_path, target, opts, res):
     for sid in {old, new}:
         if sid in running:
             raise ImportError_("la session {} est en cours sur cette machine (PID {}). "
-                               "Quittez-la (/exit) avant d'importer.".format(sid[:8], running[sid].get("pid")))
+                               "Quittez-la (/exit) avant d'importer.".format(sid[:8], running[sid].get("pid")),
+                               code="running")
 
     cfg = target.config_dir
     pj = target.projects_dir
@@ -308,11 +318,11 @@ def _import(rd, bundle_path, target, opts, res):
         same = other == slug
         if same:
             if opts.relocate:
-                raise ImportError_("la session est déjà dans ce dossier projet.")
+                raise ImportError_("la session est déjà dans ce dossier projet.", code="already_here")
             if not (opts.replace or _ask(opts, "La session {} existe déjà dans ce dossier projet (aller-retour ?). "
                                                 "La remplacer (l'ancienne version sera sauvegardée) ?".format(new[:8]))):
                 raise ImportError_("la session existe déjà ici. Relancez avec --replace pour la remplacer, "
-                                   "ou --new-id pour créer une copie.")
+                                   "ou --new-id pour créer une copie.", code="conflict_same")
             res.actions.append(("remplacer", target.join(pj, slug, new + ".jsonl"), "ancienne version sauvegardée"))
         else:
             if not (opts.replace or opts.relocate or _ask(
@@ -320,7 +330,8 @@ def _import(rd, bundle_path, target, opts, res):
                           "Deux copies du même ID rendraient `claude --resume` inutilisable.\n"
                           "La déplacer ici (l'ancienne sera sauvegardée puis supprimée) ?".format(new[:8], other))):
                 raise ImportError_("la session existe déjà dans {}. Utilisez --new-id pour importer une copie "
-                                   "indépendante, ou --replace pour la déplacer ici.".format(other))
+                                   "indépendante, ou --replace pour la déplacer ici.".format(other),
+                                   code="conflict_other")
             res.actions.append(("déplacer", target.join(pj, other, new + ".jsonl"), "sauvegardée puis supprimée"))
         to_remove.append(target.fs(target.join(pj, other, new + ".jsonl")))
         to_replace_dirs.append(target.fs(target.join(pj, other, new)))
@@ -534,6 +545,28 @@ def _import(rd, bundle_path, target, opts, res):
 
     res.git_warnings = git_check(m, target, root)
     return res
+
+
+def relocate_session(profile, info, root, maps=(), dry_run=False, keep_mtime=False):
+    """Déplace une session vers un autre dossier projet de la même machine (export + import)."""
+    import tempfile
+
+    from .exporter import export_session
+
+    if info.running:
+        raise ImportError_("la session {} est en cours (PID {}) : quittez-la avant de la déplacer.".format(
+            info.short_id, info.running.get("pid")), code="running")
+    if info.root and P.same_path(info.root, root, profile.style):
+        raise ImportError_("la session est déjà rattachée à {}".format(root), code="already_here")
+    tmpdir = tempfile.mkdtemp(prefix="cct-relocate-")
+    try:
+        tmp = os.path.join(tmpdir, "session.CCTransfert")
+        export_session(profile, info, tmp, with_memory=False, with_file_history=True, with_history=False)
+        opts = ImportOptions(root, maps=maps, new_id=False, replace=True, dry_run=dry_run,
+                             keep_mtime=keep_mtime, relocate=True)
+        return import_bundle(tmp, profile, opts)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def git_check(manifest, target, root):
