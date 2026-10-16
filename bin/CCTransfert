@@ -1,0 +1,24 @@
+#!/bin/sh
+# Lanceur Linux/macOS/WSL : exécute CCTransfert depuis ce dépôt, sans installation.
+# Usage : bin/CCTransfert <commande> …   (ou un lien symbolique dans ~/.local/bin)
+self=$0
+# Suit les liens symboliques pour retrouver le dépôt.
+while [ -L "$self" ]; do
+    target=$(readlink "$self")
+    case $target in
+        /*) self=$target ;;
+        *) self=$(dirname "$self")/$target ;;
+    esac
+done
+root=$(CDPATH= cd -- "$(dirname -- "$self")/.." && pwd)
+py=${PYTHON:-}
+if [ -z "$py" ]; then
+    for c in python3 python; do
+        if command -v "$c" >/dev/null 2>&1; then py=$c; break; fi
+    done
+fi
+if [ -z "$py" ]; then
+    echo "CCTransfert : Python 3.9+ introuvable (python3)." >&2
+    exit 1
+fi
+PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m cctransfert "$@"

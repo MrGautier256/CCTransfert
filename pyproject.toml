@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cctransfert"
+dynamic = ["version"]
+description = "Transférer une session Claude Code d'une machine (ou d'un dossier) à une autre"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+CCTransfert = "cctransfert.cli:main"
+cctransfert = "cctransfert.cli:main"
+
+[tool.setuptools]
+packages = ["cctransfert"]
+
+[tool.setuptools.dynamic]
+version = { attr = "cctransfert.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
