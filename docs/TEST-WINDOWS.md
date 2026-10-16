@@ -19,7 +19,7 @@ PowerShell.
       WSL, faites toute la checklist dans WSL et notez-le.
 - [ ] Récupérer le dépôt CCTransfert (git clone ou copie), par exemple dans
       `C:\Outils\CCTransfert`.
-- [ ] `C:\Outils\CCTransfert\bin\CCTransfert.cmd --version` affiche `CCTransfert 0.1.0`.
+- [ ] `C:\Outils\CCTransfert\bin\CCTransfert.cmd --version` affiche `CCTransfert 1.0.0`.
       Dans la suite, `CCTransfert` désigne ce lanceur (ou la commande installée par pipx).
 
 ## 1. Diagnostic (le plus important)
