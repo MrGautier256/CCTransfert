@@ -794,8 +794,9 @@ def serve(port=0, open_browser=True, app_mode=True, preload=None, quiet=False):
         app.cleanup()
         try:
             with open(_instance_file(), encoding="utf-8") as f:
-                if json.load(f).get("pid") == os.getpid():
-                    os.unlink(_instance_file())
+                mine = json.load(f).get("pid") == os.getpid()
+            if mine:  # fichier refermé avant suppression : Windows refuse d'effacer un fichier ouvert
+                os.unlink(_instance_file())
         except (OSError, ValueError):
             pass
     return 0
