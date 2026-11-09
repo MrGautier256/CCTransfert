@@ -15,10 +15,11 @@ from . import ui
 from .bundle import BundleError, BundleReader, encrypt_file
 from .exporter import default_name, export_session
 from .importer import (
-    ImportError_, ImportOptions, import_bundle, last_journal, recalled_mapping, relocate_session,
-    remember_mapping, undo, undo_check,
+    ImportError_, ImportOptions, duplicate_session, import_bundle, last_journal, recalled_mapping,
+    relocate_session, remember_mapping, undo, undo_check,
 )
 from .profile import find_claude, local_profile
+from .update import UpdateError
 from .slug import MAX_SLUG, compute_slug
 from .store import (
     SDK_ENTRYPOINTS, find_session_files, iter_project_dirs, list_sessions, parse_ts, resolve_slug,
@@ -364,7 +365,8 @@ def print_import_report(res, dry):
             print("  {:<10} {}  ({})".format(op, path, detail))
     else:
         labels = {"créer": "créé(s)", "remplacer": "remplacé(s)", "déplacer": "déplacé(s)",
-                  "identique": "déjà identique(s)", "ajouter": "ajout(s) à l'historique"}
+                  "identique": "déjà identique(s)", "ajouter": "ajout(s) à l'historique",
+                  "renommer": "intitulé changé"}
         counts = {}
         for op, _p, _d in res.actions:
             counts[op] = counts.get(op, 0) + 1
@@ -450,7 +452,7 @@ def cmd_import(args):
     confirm = None if (args.yes or not ui.interactive()) else ui.ask_yes
     opts = ImportOptions(root, maps=_parse_maps(args.map), new_id=args.new_id, replace=args.replace,
                          dry_run=args.dry_run, keep_mtime=args.keep_mtime, confirm=confirm,
-                         slug_override=slug_override)
+                         slug_override=slug_override, title=args.title)
     res = import_bundle(args.bundle, profile, opts)
     print_import_report(res, args.dry_run)
     if args.dry_run:
@@ -508,7 +510,8 @@ def cmd_relocate(args):
 
 
 def cmd_gui(args):
-    from .gui.server import install_shortcut, remove_shortcut, serve
+    from .gui.server import serve
+    from .gui.shortcuts import install_shortcut, remove_shortcut
 
     if args.install_shortcut:
         for p in install_shortcut(on_desktop=not args.no_desktop):
@@ -528,6 +531,62 @@ def cmd_gui(args):
         if not os.path.isfile(preload):
             raise CliError("fichier introuvable : {}".format(preload))
     return serve(port=args.port, open_browser=not args.no_open, app_mode=not args.browser, preload=preload)
+
+
+def default_copy_title(info):
+    base = info.display_title
+    return "{} (copie)".format(base if len(base) <= 60 else base[:59] + "…")
+
+
+def cmd_duplicate(args):
+    profile = local_profile()
+    info = find_by_selector(profile, args.session, list_sessions(profile))
+    root = _prepare_root(args.to, args, profile.style) if args.to else info.root
+    title = args.title if args.title is not None else default_copy_title(info)
+    print("Duplication de « {} » ({})\n  dans  {}\n  intitulé de la copie : {}".format(
+        ui.clip(info.display_title, 60), info.short_id, root, title))
+    if info.running:
+        ui.warn("la session est en cours : la copie s'arrête au dernier message enregistré.")
+    res = duplicate_session(profile, info, root, title=title, dry_run=args.dry_run, keep_mtime=args.keep_mtime)
+    if args.dry_run:
+        print_import_report(res, True)
+        print("\n(dry-run : rien n'a été écrit)")
+        return 0
+    print("\nCopie créée : {} (l'original {} est inchangé)".format(res.new_sid, info.short_id))
+    print_final(res, profile.style, info.entrypoint)
+    return 0
+
+
+def cmd_update(args):
+    from . import update as up
+
+    r = up.check(force=True)
+    print("Version installée : {} ({})".format(r["current"], r["kind_label"]))
+    if r["error"]:
+        raise CliError(r["error"])
+    latest = r["latest"]
+    print("Dernière version  : {}  ({})".format(latest["version"], latest["url"]))
+    if not r["available"]:
+        print("✓ CCTransfert est à jour.")
+        return 0
+    notes = [ln for ln in (latest.get("notes") or "").splitlines() if ln.strip()][:20]
+    if notes:
+        print("\nNouveautés :\n" + "\n".join("  " + ln for ln in notes))
+    if args.check:
+        return 0
+    if not r["can_auto"]:
+        print("\nPour mettre à jour :\n  " + r["instructions"])
+        return 0
+    if not args.yes and not ui.ask_yes("\nInstaller la version {} ?".format(latest["version"]), default=True):
+        return 1
+
+    def progress(done, total):
+        if total and sys.stdout.isatty():
+            print("\r  téléchargement : {} %".format(done * 100 // total), end="", flush=True)
+
+    res = up.apply(latest, progress=progress)
+    print("\n✓ Version {} installée. Relancez CCTransfert pour l'utiliser.".format(res["version"]))
+    return 0
 
 
 def cmd_doctor(args):
@@ -617,6 +676,7 @@ def build_parser():
     s.add_argument("--dry-run", action="store_true", help="tout afficher sans rien écrire")
     s.add_argument("--keep-mtime", action="store_true", help="garder les dates d'origine des fichiers")
     s.add_argument("--calibrate", action="store_true", help="vérifier le slug en lançant `claude -p ok` dans le dossier cible")
+    s.add_argument("--title", help="nouvel intitulé de la session importée (comme /rename)")
     s.add_argument("-y", "--yes", action="store_true", help="ne poser aucune question (un remplacement exige --replace)")
     s.set_defaults(func=cmd_import)
 
@@ -628,6 +688,20 @@ def build_parser():
     s = sub.add_parser("undo", help="annuler le dernier import")
     s.add_argument("-y", "--yes", action="store_true", help="ne pas demander de confirmation")
     s.set_defaults(func=cmd_undo)
+
+    s = sub.add_parser("duplicate", help="dupliquer une session sur cette machine (même dossier ou un autre)")
+    s.add_argument("session", help="ID (ou début d'ID), nom, ou N° de `list --all`")
+    s.add_argument("--to", metavar="DIR", help="dossier du projet de la copie (défaut : celui de l'original)")
+    s.add_argument("--title", help="intitulé de la copie (défaut : « <titre> (copie) »)")
+    s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--keep-mtime", action="store_true")
+    s.add_argument("-y", "--yes", action="store_true")
+    s.set_defaults(func=cmd_duplicate)
+
+    s = sub.add_parser("update", help="vérifier et installer une nouvelle version de CCTransfert")
+    s.add_argument("--check", action="store_true", help="vérifier seulement, sans installer")
+    s.add_argument("-y", "--yes", action="store_true", help="installer sans demander")
+    s.set_defaults(func=cmd_update)
 
     s = sub.add_parser("relocate", help="déplacer une session vers un autre dossier de cette machine")
     s.add_argument("session", help="ID (ou début d'ID), nom, ou N° de `list --all`")
@@ -659,7 +733,7 @@ def main(argv=None):
         os.environ["CLAUDE_CONFIG_DIR"] = os.path.abspath(os.path.expanduser(args.config_dir))
     try:
         return args.func(args) or 0
-    except (BundleError, ImportError_, CliError) as e:
+    except (BundleError, ImportError_, CliError, UpdateError) as e:
         ui.err(str(e))
         return 1
     except OSError as e:

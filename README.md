@@ -23,7 +23,28 @@ Les détails du format de stockage de Claude Code sont dans [docs/FORMAT.md](doc
 
 ## Installation
 
-### Linux (et WSL)
+### Version autonome (recommandée sous Windows)
+
+Rien à installer, pas besoin de Python. Sur la page des
+[releases](https://github.com/MrGautier256/CCTransfert/releases), téléchargez le fichier
+qui correspond à votre système :
+
+| Système | Fichier | Utilisation |
+|---|---|---|
+| Windows | `CCTransfert-<version>-windows-x64.exe` | double-clic : l'interface s'ouvre |
+| Windows (ligne de commande) | `cctransfert-cli-<version>-windows-x64.exe` | `cctransfert-cli-….exe list`, `export`… |
+| Linux | `CCTransfert-<version>-linux-x86_64` | `chmod +x` puis double-clic ou `./CCTransfert-… gui` ; avec des arguments, c'est la ligne de commande |
+
+Ensuite, dans l'onglet **Réglages**, cochez « Icône sur le bureau » et « Raccourci dans
+le menu Démarrer » (ou « menu des applications » sous Linux). L'exécutable est alors
+copié dans `%LOCALAPPDATA%\Programs\CCTransfert` (ou `~/.local/share/cctransfert`), ce qui
+permet de supprimer le fichier téléchargé.
+
+> Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre
+> ordinateur », car l'exe n'est pas signé. Cliquez sur **Informations complémentaires**,
+> puis **Exécuter quand même**.
+
+### Avec Python : Linux (et WSL)
 
 Au choix :
 
@@ -35,7 +56,7 @@ pipx install /chemin/vers/CCTransfert          # ou : uv tool install /chemin/ve
 ln -s /chemin/vers/CCTransfert/bin/CCTransfert ~/.local/bin/CCTransfert
 ```
 
-### Windows
+### Avec Python : Windows
 
 Installez Python 3.9+ depuis python.org (cochez « Add to PATH », le lanceur `py` est
 inclus), puis au choix :
@@ -84,7 +105,8 @@ CCTransfert gui --install-shortcut       # crée l'icône à cliquer (menu + bur
 CCTransfert gui --remove-shortcut        # retire ces icônes
 ```
 
-**Icône à cliquer.** Lancez une fois `CCTransfert gui --install-shortcut`. Il crée :
+**Icône à cliquer.** Dans l'onglet **Réglages**, cochez les raccourcis voulus, ou lancez
+une fois `CCTransfert gui --install-shortcut`. Cela crée :
 - sous Linux : une entrée « CCTransfert » dans le menu des applications et une icône sur
   le bureau, déjà marquée « de confiance » pour le bureau GNOME. Pour l'avoir dans le
   dock : clic droit sur l'application ouverte, puis « Épingler au dock » ;
@@ -97,13 +119,16 @@ Cliquer une deuxième fois ne lance pas un deuxième serveur : une nouvelle fen�
 sur l'instance déjà lancée.
 
 L'interface s'ouvre dans une fenêtre dédiée, via Chrome, Edge ou Brave en mode
-application, ou à défaut dans un onglet du navigateur par défaut. Elle propose quatre
+application, ou à défaut dans un onglet du navigateur par défaut. Elle propose cinq
 onglets :
 
 - **Exporter** : les sessions de la machine, regroupées par projet, avec une recherche.
   On choisit une session, ce qu'on inclut (rewind, mémoire, historique) et le dossier
-  de destination, puis on clique sur **Exporter**. Une session peut aussi être déplacée
-  vers un autre dossier de la même machine.
+  de destination, puis on clique sur **Exporter**. La même session peut aussi être :
+  - **dupliquée** sur cette machine : une copie indépendante avec un nouvel ID, dans le
+    même dossier ou un autre, sous un nouvel intitulé. Pratique pour explorer une
+    autre piste sans toucher à l'original ;
+  - **déplacée** vers un autre dossier de la machine.
 - **Importer** : on dépose le fichier `.CCTransfert`, ou on le choisit. L'interface
   propose ensuite :
   - le dossier cible : celui mémorisé pour ce projet, ou un projet du même nom sur la
@@ -115,12 +140,18 @@ onglets :
   À la fin, elle affiche les commandes `claude -r` à copier.
 - **Historique** : les imports réalisés ; on peut annuler le dernier.
 - **Diagnostic** : l'équivalent de `CCTransfert doctor`, avec la copie du JSON.
+- **Réglages** :
+  - les raccourcis (bureau, menu Démarrer ou menu des applications), qu'on coche ou
+    décoche ;
+  - les mises à jour (version installée, vérification automatique, « Vérifier
+    maintenant »).
 
 L'interface est une page locale servie par CCTransfert :
 - elle écoute uniquement sur `127.0.0.1` et est protégée par un jeton aléatoire ;
 - elle s'ouvre dans un profil de navigateur dédié (`~/.CCTransfert/browser-profile`) :
   vos extensions n'y ont pas accès ;
-- elle fonctionne sans aucune ressource externe et ne fait sortir aucune donnée ;
+- la page ne charge aucune ressource externe. Le seul appel réseau est la vérification
+  des mises à jour auprès de GitHub (voir plus bas), que l'on peut désactiver ;
 - elle s'arrête toute seule quand on ferme la fenêtre (ou avec le bouton **Quitter**).
 
 Aucune dépendance n'est à installer, et `tkinter` n'est pas nécessaire. Toutes les
@@ -172,14 +203,16 @@ en cours.
 
 | Commande | Rôle |
 |---|---|
-| `gui [BUNDLE] [--browser] [--no-open] [--install-shortcut]` | Interface graphique (voir ci-dessus). |
+| `gui [BUNDLE] [--browser] [--no-open] [--install-shortcut [--no-desktop]] [--remove-shortcut]` | Interface graphique (voir ci-dessus). |
 | `doctor [--json]` | Diagnostic : OS, WSL, dossier de config, version de Claude Code, dossier temp, slug du dossier courant, vérification de l'algorithme sur les dossiers existants, convention de lettre de lecteur. |
 | `list [--here \| --dir PATH \| --all]` | Sessions (N°, ID court, dernière activité, taille, titre, dossier). `●` = en cours, `[-p]` = créée par `claude -p` (absente du picker de Claude Code). |
 | `export [ID\|NOM\|N°] [--dir PATH\|--all] [--latest] [-o FICHIER\|DOSSIER] [--with-memory] [--with-history] [--no-file-history] [--encrypt]` | Crée le bundle. Sans argument : choix interactif dans les sessions du dossier courant (`t` = toutes). |
-| `import BUNDLE [--to DIR] [--map ANCIEN=NOUVEAU …] [--new-id] [--replace] [--dry-run] [--keep-mtime] [--calibrate] [-y]` | Importe et réécrit les chemins. |
+| `import BUNDLE [--to DIR] [--map ANCIEN=NOUVEAU …] [--new-id] [--replace] [--title T] [--dry-run] [--keep-mtime] [--calibrate] [-y]` | Importe et réécrit les chemins. `--title` donne un nouvel intitulé à la session. |
+| `duplicate SESSION [--to DIR] [--title T] [--dry-run]` | Copie indépendante d'une session sur cette machine (nouvel ID), dans le même dossier (par défaut) ou dans `DIR`. Intitulé par défaut : « <titre> (copie) ». |
 | `inspect BUNDLE [--files]` | Résumé du bundle et vérification des sha256. |
 | `undo [-y]` | Annule le dernier import (sauvegardes dans `~/.CCTransfert/backups/`). |
 | `relocate SESSION --to DIR` | Déplace une session vers un autre dossier de la même machine. |
+| `update [--check] [-y]` | Vérifie s'il existe une nouvelle version et l'installe. |
 
 Options utiles :
 
@@ -207,6 +240,27 @@ Options utiles :
   requête API.
 - **`--encrypt`** (export) : chiffre le bundle avec `age` ou `gpg` (phrase de passe).
   L'import le détecte et le déchiffre.
+
+---
+
+## Mises à jour
+
+Au démarrage de l'interface, au plus une fois par jour, CCTransfert interroge l'API
+publique des releases GitHub. C'est un appel anonyme : seul l'en-tête
+`User-Agent: CCTransfert/<version>` est envoyé. Si une version plus récente existe, un
+bandeau propose de la **télécharger et l'installer**. On peut aussi l'ignorer, ou ne
+rien faire. On désactive cette vérification dans **Réglages** ; `CCTransfert update`
+fait la même chose en ligne de commande.
+
+| Installation | Mise à jour |
+|---|---|
+| exe Windows, binaire Linux | automatique : téléchargement, vérification sha256, remplacement, redémarrage |
+| `pipx`, `uv tool` | automatique, via `pipx install --force` ou `uv tool install --force` |
+| copie du dépôt git | l'interface affiche la commande `git pull` à lancer |
+
+Un fichier téléchargé est refusé si son empreinte ne correspond pas à celle publiée dans
+le `SHA256SUMS.txt` de la release. Les sessions, réglages et sauvegardes ne sont jamais
+touchés par une mise à jour.
 
 ---
 
@@ -336,7 +390,22 @@ Les tests simulent des machines Linux et Windows dans des dossiers temporaires :
 - `--new-id`, conflits, aller-retour A → B → A identique à l'octet ;
 - dry-run, undo, zip-slip, sha256 ;
 - parcours complet de la CLI ;
-- API de l'interface graphique : jeton, en-tête `Host`, export, import, conflits, undo.
+- API de l'interface graphique : jeton, en-tête `Host`, export, import, conflits, undo ;
+- duplication, mise à jour (contre un faux GitHub local), lanceur.
+
+**Version autonome.** `packaging/build.py` construit l'exécutable avec PyInstaller
+(`pip install pyinstaller`, puis `python packaging/build.py`), et
+`packaging/smoke_test.py <exe>` le vérifie. Un exe Windows ne se construit que sous
+Windows.
+
+**CI** (`.github/workflows/build.yml`) :
+- à chaque push : tests sous Linux et Windows (Python 3.9 et 3.12), construction de
+  l'exe Windows et du binaire Linux, vérification des deux ;
+- à chaque tag `v*` : publication de la release avec l'exe, le binaire, la wheel, les
+  sources et `SHA256SUMS.txt`. Les notes sont lues dans `docs/releases/<tag>.md`.
+
+Pour publier une version : mettre à jour `__version__` dans `cctransfert/__init__.py`,
+écrire `docs/releases/vX.Y.Z.md`, commiter, puis `git tag vX.Y.Z && git push --tags`.
 
 Organisation du code (`cctransfert/`) :
 
@@ -352,3 +421,6 @@ Organisation du code (`cctransfert/`) :
 | `exporter.py`, `importer.py` | export, import, sauvegardes et undo |
 | `doctor.py`, `cli.py`, `ui.py` | diagnostic et ligne de commande |
 | `gui/server.py`, `gui/static/` | interface graphique : API JSON locale et page HTML/CSS/JS |
+| `gui/shortcuts.py` | raccourcis bureau et menu (Windows, Linux) |
+| `update.py` | vérification et installation des mises à jour |
+| `launch.py`, `packaging/` | version autonome (PyInstaller) : point d'entrée, construction, vérification |

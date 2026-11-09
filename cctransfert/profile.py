@@ -177,6 +177,14 @@ def local_project_dir_name():
     return v if valid_project_dir_name(v) else None
 
 
+def no_window():
+    """Options de subprocess pour qu'une commande console ne fasse pas apparaître de fenêtre
+    (sous Windows, depuis l'interface graphique ou l'exe sans console)."""
+    if os.name == "nt":
+        return {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
+    return {}
+
+
 _VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
 
 
@@ -215,7 +223,7 @@ def claude_version(timeout=20, exe=None):
     try:
         out = subprocess.run(
             [exe, "--version"], capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+            encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, **no_window()
         ).stdout
         m = _VERSION_RE.search(out or "")
         if m:

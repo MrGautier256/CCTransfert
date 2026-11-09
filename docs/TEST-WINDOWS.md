@@ -14,13 +14,21 @@ PowerShell.
 
 ## 0. Préparation
 
-- [ ] Python 3.9+ installé (`py --version`).
-- [ ] Claude Code installé **sous Windows** (`claude --version`). S'il est installé dans
-      WSL, faites toute la checklist dans WSL et notez-le.
-- [ ] Récupérer le dépôt CCTransfert (git clone ou copie), par exemple dans
-      `C:\Outils\CCTransfert`.
-- [ ] `C:\Outils\CCTransfert\bin\CCTransfert.cmd --version` affiche `CCTransfert 1.0.0`.
-      Dans la suite, `CCTransfert` désigne ce lanceur (ou la commande installée par pipx).
+Le plus simple est la **version autonome**, qui ne demande pas Python :
+
+- [ ] Sur la page des releases, télécharger `CCTransfert-<version>-windows-x64.exe` et
+      `cctransfert-cli-<version>-windows-x64.exe`, par exemple dans `C:\Outils`.
+- [ ] Double-clic sur `CCTransfert-….exe`. Si SmartScreen affiche « Windows a protégé
+      votre ordinateur », cliquer sur **Informations complémentaires**, puis
+      **Exécuter quand même**. Noter si un antivirus le bloque.
+- [ ] L'interface s'ouvre (fenêtre Edge sans barre d'adresse), **sans fenêtre de console**.
+- [ ] Claude Code est installé **sous Windows** (`claude --version`). S'il est dans WSL,
+      notez-le : il faudra utiliser CCTransfert dans WSL.
+- [ ] Dans la suite, `CCTransfert` désigne `C:\Outils\cctransfert-cli-<version>-windows-x64.exe`
+      dans PowerShell, et `CCTransfert --version` affiche la bonne version.
+
+Variante avec Python (python.org, 3.9+) : récupérer le dépôt, puis utiliser
+`bin\CCTransfert.cmd` ou double-cliquer sur `CCTransfert.pyw`.
 
 ## 1. Diagnostic (le plus important)
 
@@ -161,6 +169,28 @@ Sur Linux :
 - [ ] Un deuxième double-clic ouvre une deuxième fenêtre, sans lancer un deuxième
       `pythonw.exe` (vérifier dans le Gestionnaire des tâches).
 - [ ] `CCTransfert gui --remove-shortcut` retire les deux raccourcis.
+
+## 6 bis. Version autonome : raccourcis, duplication, mise à jour
+
+- [ ] Onglet **Réglages** : cocher « Icône sur le bureau » puis « Raccourci dans le menu
+      Démarrer ». Vérifier que :
+      - `CCTransfert.exe` a été copié dans `%LOCALAPPDATA%\Programs\CCTransfert` ;
+      - les deux raccourcis ont l'icône CCTransfert ;
+      - ils ouvrent l'interface même après suppression de l'exe téléchargé.
+- [ ] Décocher les deux cases : les raccourcis disparaissent.
+- [ ] Onglet **Exporter** → une session → **Dupliquer…** → même dossier, intitulé « essai
+      copie ». Vérifier que :
+      - la copie apparaît dans la liste ;
+      - `claude -r` dans le dossier montre les deux sessions ;
+      - la copie se reprend ;
+      - **Historique** → « Annuler le dernier import » la supprime.
+- [ ] **Réglages** → « Vérifier maintenant » affiche la dernière version, ou « à jour ».
+- [ ] Mise à jour réelle, quand une version plus récente existe : lancer l'ancienne
+      version installée. Vérifier que :
+      - le bandeau « Une nouvelle version… » apparaît ;
+      - « Mettre à jour » télécharge la nouvelle version, ferme la fenêtre et en rouvre une ;
+      - le numéro affiché en haut à gauche est le nouveau ;
+      - il ne reste pas de `CCTransfert.exe.old` au lancement suivant.
 
 ## 7. Cas particuliers (si le temps le permet)
 

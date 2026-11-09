@@ -16,11 +16,13 @@
     <button class="tab" data-tab="import" role="tab">Importer</button>
     <button class="tab" data-tab="history" role="tab">Historique</button>
     <button class="tab" data-tab="doctor" role="tab">Diagnostic</button>
+    <button class="tab" data-tab="settings" role="tab">Réglages</button>
   </nav>
   <div class="machine" id="machine" title=""></div>
   <button class="btn ghost small" id="quit" title="Arrêter CCTransfert et fermer">Quitter</button>
 </header>
 
+<div class="update-banner" id="update-banner" hidden></div>
 <div class="offline" id="offline" hidden>Le serveur CCTransfert est arrêté. Relancez <code>CCTransfert gui</code>.</div>
 
 <main>
@@ -76,6 +78,11 @@
     </div>
   </section>
 
+  <!-- Réglages -->
+  <section class="tabpanel" id="tab-settings">
+    <div class="narrow" id="settings"><div class="empty">Chargement…</div></div>
+  </section>
+
   <!-- Diagnostic -->
   <section class="tabpanel" id="tab-doctor">
     <div class="narrow wide" id="doctor"><div class="empty">Chargement…</div></div>
@@ -100,6 +107,29 @@
       <span class="muted small" id="picker-hint"></span>
       <button class="btn" value="cancel">Annuler</button>
       <button type="button" class="btn primary" id="picker-ok">Choisir ce dossier</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- Duplication d'une session -->
+<dialog id="dup" class="modal">
+  <form method="dialog" class="modal-inner">
+    <header class="modal-head"><h3>Dupliquer la session</h3><button class="icon-btn" value="cancel" aria-label="Fermer">✕</button></header>
+    <div class="modal-body">
+      <p class="muted small" id="dup-source"></p>
+      <label class="field"><span class="lbl">Intitulé de la copie</span><input type="text" id="dup-title" autocomplete="off"></label>
+      <div class="lbl mt10">Emplacement</div>
+      <label class="check"><input type="radio" name="dup-where" value="same" checked>
+        <span><span class="lbl">Même dossier</span><span class="hint mono" id="dup-same"></span></span></label>
+      <label class="check"><input type="radio" name="dup-where" value="other">
+        <span><span class="lbl">Autre dossier</span><span class="hint">Il sera créé s'il n'existe pas.</span></span></label>
+      <div class="dest"><input type="text" class="path" id="dup-target" spellcheck="false" disabled>
+        <button type="button" class="btn" id="dup-browse" disabled>Parcourir…</button></div>
+      <div id="dup-note"></div>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn" value="cancel">Annuler</button>
+      <button type="button" class="btn primary" id="dup-ok">Dupliquer</button>
     </footer>
   </form>
 </dialog>

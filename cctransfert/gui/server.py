@@ -33,9 +33,10 @@ from .. import paths as P
 from ..bundle import BundleError, BundleReader
 from ..exporter import collect, default_name, export_session, full_scan, git_info, history_lines
 from ..importer import (
-    ImportError_, ImportOptions, import_bundle, last_journal, list_journals, recalled_mapping,
-    relocate_session, remember_mapping, tool_home, undo, undo_check,
+    ImportError_, ImportOptions, duplicate_session, import_bundle, last_journal, list_journals,
+    recalled_mapping, relocate_session, remember_mapping, tool_home, undo, undo_check,
 )
+from .. import update as up
 from ..jsonio import write_json_atomic
 from ..profile import local_profile
 from ..slug import is_session_id
@@ -316,7 +317,8 @@ class App:
         if not (isinstance(forced, str) and is_session_id(forced)):
             forced = None
         return ImportOptions(target, maps=maps, new_id=bool(body.get("new_id")), replace=bool(body.get("replace")),
-                             dry_run=dry, keep_mtime=bool(body.get("keep_mtime")), forced_sid=forced)
+                             dry_run=dry, keep_mtime=bool(body.get("keep_mtime")), forced_sid=forced,
+                             title=body.get("title"))
 
     def _do_import(self, body, dry):
         path = body.get("path", "")
@@ -351,6 +353,63 @@ class App:
         d = result_dict(res, info.entrypoint)
         d["dry_run"] = dry
         return d
+
+    def api_duplicate(self, q, body):
+        """Copie d'une session sur cette machine (nouvel ID), même dossier ou autre, nouvel intitulé."""
+        info = self.find(body.get("id", ""))
+        dry = bool(body.get("dry_run"))
+        target = (body.get("target") or "").strip()
+        if target:
+            target = os.path.abspath(os.path.expanduser(target))
+            if os.path.exists(target) and not os.path.isdir(target):
+                raise ApiError("{} existe mais n'est pas un dossier".format(target))
+            if not dry:
+                os.makedirs(target, exist_ok=True)
+            if os.path.isdir(target):
+                target = os.path.realpath(target)
+        with self.write_lock:
+            res = duplicate_session(self.profile, info, target or None, title=body.get("title"), dry_run=dry)
+        d = result_dict(res, info.entrypoint)
+        d["dry_run"] = dry
+        return d
+
+    # -- mises à jour et raccourcis ------------------------------------------------------
+
+    def api_update(self, q, body):
+        return up.check(force=q.get("force") == "1")
+
+    def api_update_skip(self, q, body):
+        up.save_state(skipped=body.get("version"))
+        return {"ok": True}
+
+    def api_update_settings(self, q, body):
+        up.save_state(auto_check=bool(body.get("auto_check")))
+        return {"auto_check": bool(body.get("auto_check"))}
+
+    def api_update_apply(self, q, body):
+        with self.write_lock:
+            res = up.apply()
+
+        def restart():  # on répond d'abord à la page, puis on passe la main à la nouvelle version
+            time.sleep(0.8)
+            up.spawn_restart(res["restart"])
+            self.quit = True
+
+        threading.Thread(target=restart, daemon=True).start()
+        return {"version": res["version"], "restarting": True}
+
+    def api_shortcuts(self, q, body):
+        from . import shortcuts
+
+        return shortcuts.status()
+
+    def api_shortcuts_set(self, q, body):
+        from . import shortcuts
+
+        created, removed = shortcuts.set_shortcuts(desktop=body.get("desktop"), menu=body.get("menu"))
+        st = shortcuts.status()
+        st.update(created=created, removed=removed)
+        return st
 
     def api_journals(self, q, body):
         out = []
@@ -487,6 +546,10 @@ ROUTES = {
     ("GET", "/api/session"): "api_session", ("POST", "/api/export"): "api_export",
     ("POST", "/api/bundle"): "api_bundle", ("POST", "/api/preview"): "api_preview",
     ("POST", "/api/import"): "api_import", ("POST", "/api/relocate"): "api_relocate",
+    ("POST", "/api/duplicate"): "api_duplicate",
+    ("GET", "/api/update"): "api_update", ("POST", "/api/update/skip"): "api_update_skip",
+    ("POST", "/api/update/settings"): "api_update_settings", ("POST", "/api/update/apply"): "api_update_apply",
+    ("GET", "/api/shortcuts"): "api_shortcuts", ("POST", "/api/shortcuts"): "api_shortcuts_set",
     ("GET", "/api/journals"): "api_journals", ("POST", "/api/undo"): "api_undo",
     ("GET", "/api/doctor"): "api_doctor", ("GET", "/api/fs"): "api_fs", ("GET", "/api/stat"): "api_stat",
     ("POST", "/api/open"): "api_open", ("POST", "/api/ping"): "api_ping", ("POST", "/api/bye"): "api_bye",
@@ -569,6 +632,8 @@ def make_handler(app, port_ref):
                 self._send(409 if e.code else 400, {"error": str(e), "code": e.code})
             except BundleError as e:
                 self._send(422, {"error": str(e), "code": "bundle"})
+            except up.UpdateError as e:
+                self._send(502, {"error": str(e), "code": "update"})
             except OSError as e:
                 self._send(500, {"error": str(e), "code": "os"})
             except Exception as e:  # noqa: BLE001 - on renvoie l'erreur à la page plutôt que de couper la connexion
@@ -686,6 +751,7 @@ def existing_instance():
 
 def serve(port=0, open_browser=True, app_mode=True, preload=None, quiet=False):
     """Lance l'interface. Bloque jusqu'à la fermeture de la dernière fenêtre (ou Ctrl+C)."""
+    up.wait_for_previous()  # relance après une mise à jour : laisser l'ancienne version se fermer
     if open_browser:
         inst = existing_instance()
         if inst:
@@ -733,121 +799,3 @@ def serve(port=0, open_browser=True, app_mode=True, preload=None, quiet=False):
         except (OSError, ValueError):
             pass
     return 0
-
-
-# -- raccourcis (icône à cliquer) -----------------------------------------------------------
-
-
-def _pkg_parent():
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
-def _wm_class():
-    """Identifiant que Chrome donnera à la fenêtre, pour que le dock affiche l'icône CCTransfert."""
-    exes = _app_browsers()
-    name = os.path.basename(exes[0]) if exes else ""
-    prefix = ("chrome" if name.startswith("google-chrome") else "chromium" if name.startswith("chromium")
-              else "brave" if name.startswith("brave") else "msedge" if "edge" in name else None)
-    if os.environ.get("XDG_SESSION_TYPE") == "wayland" and prefix:
-        return "{}-{}-Default".format(prefix, APP_SLUG)
-    return APP_SLUG
-
-
-def _xdg_desktop_dir():
-    home = os.path.expanduser("~")
-    try:
-        with open(os.path.join(home, ".config", "user-dirs.dirs"), encoding="utf-8") as f:
-            for line in f:
-                m = re.match(r'\s*XDG_DESKTOP_DIR="(.*)"', line)
-                if m:
-                    return m.group(1).replace("$HOME", home)
-    except OSError:
-        pass
-    for n in ("Desktop", "Bureau"):
-        if os.path.isdir(os.path.join(home, n)):
-            return os.path.join(home, n)
-    return None
-
-
-def _linux_paths():
-    data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    return {
-        "menu": os.path.join(data, "applications", "cctransfert.desktop"),
-        "svg": os.path.join(data, "icons", "hicolor", "scalable", "apps", "cctransfert.svg"),
-        "png": os.path.join(data, "icons", "hicolor", "256x256", "apps", "cctransfert.png"),
-        "desktop": os.path.join(_xdg_desktop_dir(), "cctransfert.desktop") if _xdg_desktop_dir() else None,
-        "apps_dir": os.path.join(data, "applications"),
-    }
-
-
-def _powershell(script):
-    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        raise OSError("PowerShell : " + (r.stderr or r.stdout).strip())
-    return r.stdout.strip()
-
-
-def install_shortcut(on_desktop=True):
-    """Ajoute l'icône CCTransfert au menu des applications et (par défaut) sur le bureau.
-
-    Renvoie la liste des fichiers créés.
-    """
-    if sys.platform.startswith("win"):
-        pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-        exe = pyw if os.path.isfile(pyw) else sys.executable  # pythonw : pas de fenêtre de console
-        q = lambda v: v.replace("'", "''")  # noqa: E731 - échappement PowerShell
-        script = (
-            "$ws=New-Object -COM WScript.Shell;"
-            "$dirs=@([Environment]::GetFolderPath('Programs'){desk});"
-            "foreach($d in $dirs){{$p=Join-Path $d 'CCTransfert.lnk';$s=$ws.CreateShortcut($p);"
-            "$s.TargetPath='{exe}';$s.Arguments='-m cctransfert gui';$s.WorkingDirectory='{wd}';"
-            "$s.IconLocation='{ico},0';$s.Description='Transférer une session Claude Code';$s.Save();Write-Output $p}}"
-        ).format(desk=",[Environment]::GetFolderPath('Desktop')" if on_desktop else "", exe=q(exe),
-                 wd=q(_pkg_parent()), ico=q(os.path.join(STATIC, "icon.ico")))
-        return _powershell(script).splitlines()
-
-    if sys.platform == "darwin":
-        raise OSError("raccourci non pris en charge sous macOS : lancez `CCTransfert gui`")
-    paths = _linux_paths()
-    for key, src in (("svg", "icon.svg"), ("png", "icon-256.png")):
-        os.makedirs(os.path.dirname(paths[key]), exist_ok=True)
-        shutil.copyfile(os.path.join(STATIC, src), paths[key])
-    entry = (
-        "[Desktop Entry]\nType=Application\nName=CCTransfert\n"
-        "GenericName=Transfert de sessions Claude Code\n"
-        "Comment=Transférer une session Claude Code vers une autre machine\n"
-        'Exec=env PYTHONPATH="{pp}" "{py}" -m cctransfert gui %f\n'
-        "Icon={icon}\nTerminal=false\nCategories=Development;\nStartupNotify=true\n"
-        "StartupWMClass={wm}\nKeywords=claude;session;transfert;export;import;\n"
-    ).format(pp=_pkg_parent(), py=sys.executable, icon=paths["svg"], wm=_wm_class())
-    created = []
-    targets = [paths["menu"]] + ([paths["desktop"]] if on_desktop and paths["desktop"] else [])
-    for t in targets:
-        os.makedirs(os.path.dirname(t), exist_ok=True)
-        with open(t, "w", encoding="utf-8") as f:
-            f.write(entry)
-        os.chmod(t, 0o755)
-        created.append(t)
-    if on_desktop and paths["desktop"] and shutil.which("gio"):
-        # Le bureau GNOME (DING) ne lance une icône que si elle est marquée « de confiance ».
-        subprocess.run(["gio", "set", paths["desktop"], "metadata::trusted", "true"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if shutil.which("update-desktop-database"):
-        subprocess.run(["update-desktop-database", paths["apps_dir"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return created
-
-
-def remove_shortcut():
-    """Retire les icônes créées par install_shortcut. Renvoie la liste des fichiers supprimés."""
-    if sys.platform.startswith("win"):
-        script = ("foreach($d in @([Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('Desktop')))"
-                  "{$p=Join-Path $d 'CCTransfert.lnk';if(Test-Path $p){Remove-Item $p;Write-Output $p}}")
-        return _powershell(script).splitlines()
-    removed = []
-    p = _linux_paths()
-    for key in ("menu", "desktop", "svg", "png"):
-        if p.get(key) and os.path.isfile(p[key]):
-            os.unlink(p[key])
-            removed.append(p[key])
-    return removed

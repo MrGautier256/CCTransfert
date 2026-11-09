@@ -10,18 +10,20 @@ import pytest
 
 from conftest import SID, build_session
 from cctransfert.gui.server import make_server
-from cctransfert.profile import Profile
+from cctransfert.profile import Profile, host_os
 from cctransfert.store import find_session_files
 
 
 @pytest.fixture
 def gui(tmp_path, monkeypatch):
+    tmp_path = type(tmp_path)(os.path.realpath(str(tmp_path)))  # Windows : pas de noms courts RUNNER~1
     home = tmp_path / "home"
     cfg = home / ".claude"
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
     monkeypatch.delenv("CLAUDE_CODE_PROJECT_DIR_NAME", raising=False)
-    prof = Profile("linux", str(home), str(cfg), "/tmp/claude-test", hostname="h", user="u")
+    prof = Profile(host_os(), str(home), str(cfg), "/tmp/claude-test", hostname="h", user="u")
     root = str(home / "Projets" / "MonProjet")
     os.makedirs(root)
     slug = build_session(prof, root)

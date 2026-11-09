@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from . import paths as P
 from .bundle import BundleReader
-from .jsonio import AtomicWriter, split_eol, write_json_atomic
+from .jsonio import AtomicWriter, dumps_js, split_eol, write_json_atomic
 from .rewrite import Report, Rewriter, build_rules
 from .store import find_session_files, resolve_slug, running_sessions
 
@@ -67,8 +67,11 @@ def recalled_mapping(source):
 
 class ImportOptions:
     def __init__(self, target_root, maps=(), new_id=False, replace=False, dry_run=False,
-                 keep_mtime=False, confirm=None, now=None, relocate=False, slug_override=None, forced_sid=None):
+                 keep_mtime=False, confirm=None, now=None, relocate=False, slug_override=None, forced_sid=None,
+                 title=None):
         self.target_root = target_root
+        # Nouvel intitulé de la session (comme /rename dans Claude Code), ou None.
+        self.title = (title or "").strip() or None
         self.forced_sid = forced_sid  # avec new_id : réutilise l'ID montré par l'aperçu
         self.slug_override = slug_override  # slug observé par --calibrate
         self.maps = list(maps)
@@ -357,6 +360,8 @@ def _import(rd, bundle_path, target, opts, res):
             history_member = member
             continue
         if parts[0] == "session":
+            if opts.title and member == "session/{}/custom-title.json".format(old):
+                continue  # remplacé par le nouvel intitulé (voir plus bas)
             if member == "session/{}.jsonl".format(old):
                 dest = transcript
             elif parts[1] == old and len(parts) > 2:
@@ -383,6 +388,16 @@ def _import(rd, bundle_path, target, opts, res):
             continue
         plan.append((member, dest, _content_kind(member), e.get("mtime"), kind))
 
+    if opts.title:
+        plan.append((None, target.join(pj, slug, new, "custom-title.json"), "title-json", None, "session-dir"))
+        res.actions.append(("renommer", transcript, "intitulé : {}".format(opts.title)))
+    title_lines = b""
+    if opts.title:
+        title_lines = (dumps_js({"type": "custom-title", "customTitle": opts.title, "sessionId": new}) + "\n"
+                       + dumps_js({"type": "agent-name", "agentName": opts.title, "sessionId": new}) + "\n"
+                       ).encode("utf-8")
+    transcript_member = "session/{}.jsonl".format(old)
+
     now = opts.now or time.time()
     journal = None if opts.dry_run else Journal([old, new] if old != new else [new], root, bundle_path)
     if journal is not None:
@@ -402,11 +417,23 @@ def _import(rd, bundle_path, target, opts, res):
 
     def produce(member, how):
         """Contenu cible d'un membre, sous forme d'itérable d'octets (streaming pour les .jsonl)."""
+        if how == "title-json":
+            yield dumps_js({"customTitle": opts.title}).encode("utf-8")
+            return
         if how == "jsonl":
+            last = b"\n"
             with rd.open(member) as f:
                 for n, raw in enumerate(f, 1):
                     body, eol = split_eol(raw)
-                    yield rw.rewrite_line(body, "{}:{}".format(member, n)) + eol
+                    out = rw.rewrite_line(body, "{}:{}".format(member, n)) + eol
+                    if out:
+                        last = out
+                    yield out
+            if title_lines and member == transcript_member:
+                # Comme /rename : Claude Code retient le dernier custom-title de la fin du fichier.
+                if not last.endswith(b"\n"):
+                    yield b"\n"
+                yield title_lines
             return
         data = rd.read(member)
         if how == "json":
@@ -564,6 +591,26 @@ def relocate_session(profile, info, root, maps=(), dry_run=False, keep_mtime=Fal
         export_session(profile, info, tmp, with_memory=False, with_file_history=True, with_history=False)
         opts = ImportOptions(root, maps=maps, new_id=False, replace=True, dry_run=dry_run,
                              keep_mtime=keep_mtime, relocate=True)
+        return import_bundle(tmp, profile, opts)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def duplicate_session(profile, info, target_root=None, title=None, dry_run=False, keep_mtime=False):
+    """Copie indépendante d'une session sur la même machine (nouvel ID), dans le même dossier
+    projet ou dans un autre, éventuellement sous un nouvel intitulé."""
+    import tempfile
+
+    from .exporter import export_session
+
+    root = target_root or info.root
+    if not root:
+        raise ImportError_("dossier d'origine de la session inconnu : indiquez un dossier cible")
+    tmpdir = tempfile.mkdtemp(prefix="cct-dup-")
+    try:
+        tmp = os.path.join(tmpdir, "session.CCTransfert")
+        export_session(profile, info, tmp, with_memory=False, with_file_history=True, with_history=False)
+        opts = ImportOptions(root, new_id=True, dry_run=dry_run, keep_mtime=keep_mtime, title=title)
         return import_bundle(tmp, profile, opts)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

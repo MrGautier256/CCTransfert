@@ -218,6 +218,7 @@ def test_conflit_autre_slug(tmp_path):
     assert os.path.isfile(A.fs(A.join(A.projects_dir, slug_a, SID, "subagents", "agent-abc.jsonl")))
 
 
+@pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="utilise /proc (Linux)")
 def test_session_en_cours_refusee(tmp_path):
     A = make_machine(tmp_path, "pcA", "linux", "/home/a")
     slug_a = build_session(A, ROOT_A)
@@ -406,3 +407,52 @@ def test_undo_retire_les_dossiers_vides_ajoutes_par_claude(tmp_path):
     undo(d, data)
     assert not os.path.exists(B.fs(B.join(B.projects_dir, res.slug)))
     assert not os.path.exists(B.fs(B.join(B.config_dir, "session-env", SID)))
+
+
+# -- duplication sur la même machine ------------------------------------------------------------
+
+
+def test_dupliquer_dans_le_meme_dossier_avec_nouvel_intitule(tmp_path):
+    from cctransfert.importer import duplicate_session
+    from cctransfert.store import summarize
+
+    A = make_machine(tmp_path, "pcA", "linux", "/home/a")
+    slug_a = build_session(A, ROOT_A)
+    orig = transcript_bytes(A, slug_a)
+    res = duplicate_session(A, session_info(A, slug_a), title="Ma copie à tester")
+    new = res.new_sid
+    assert new != SID and res.slug == slug_a  # même dossier projet
+    assert transcript_bytes(A, slug_a) == orig  # l'original n'a pas bougé
+    assert sorted(s.sid for s in list_sessions(A)) == sorted([SID, new])
+    copie = summarize(A, slug_a, new)
+    assert copie.title == "Ma copie à tester" and copie.root == ROOT_A
+    lines = [json.loads(x) for x in transcript_bytes(A, slug_a, new).splitlines()[-2:]]
+    assert lines == [{"type": "custom-title", "customTitle": "Ma copie à tester", "sessionId": new},
+                     {"type": "agent-name", "agentName": "Ma copie à tester", "sessionId": new}]
+    assert os.path.isfile(A.fs(A.join(A.config_dir, "file-history", new, "abcd@v1")))  # rewind conservé
+    d, data = last_journal()
+    assert undo(d, data) == []
+    assert find_session_files(A, new) == [] and transcript_bytes(A, slug_a) == orig
+
+
+def test_dupliquer_vers_un_autre_dossier(tmp_path):
+    from cctransfert.importer import duplicate_session
+
+    A = make_machine(tmp_path, "pcA", "linux", "/home/a")
+    slug_a = build_session(A, ROOT_A)
+    res = duplicate_session(A, session_info(A, slug_a), target_root="/home/a/Projets/MonProjet-essai")
+    assert res.slug == compute_slug("/home/a/Projets/MonProjet-essai") and res.new_sid != SID
+    assert users(A, res.slug, res.new_sid)[0]["cwd"] == "/home/a/Projets/MonProjet-essai"
+    assert find_session_files(A, SID) == [slug_a]  # l'original reste en place
+
+
+def test_import_avec_nouvel_intitule(tmp_path):
+    from cctransfert.store import summarize
+
+    A = make_machine(tmp_path, "pcA", "linux", "/home/a")
+    slug_a = build_session(A, ROOT_A)
+    B = make_machine(tmp_path, "pcB", "linux", "/home/b")
+    res = import_bundle(export(A, slug_a, tmp_path), B, ImportOptions("/home/b/K", title="  Sur le PC 2  "))
+    assert summarize(B, res.slug, SID).title == "Sur le PC 2"
+    d, data = last_journal()
+    assert undo_check(data) == []  # le renommage fait partie de l'import, pas une modification après coup

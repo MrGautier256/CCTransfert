@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from . import __version__
 from . import paths as P
 from .bundle import BundleWriter
+from .profile import no_window
 from .store import parse_ts, prompt_text
 
 
@@ -74,7 +75,8 @@ def git_info(root):
     def g(*args):
         try:
             p = subprocess.run(["git", "-C", root] + list(args), capture_output=True, text=True,
-                               timeout=10, encoding="utf-8", errors="replace")
+                               timeout=10, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+                               **no_window())
         except (OSError, subprocess.SubprocessError):
             return None
         return p.stdout.strip() if p.returncode == 0 else None

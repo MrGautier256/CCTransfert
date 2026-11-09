@@ -14,7 +14,7 @@ LAUNCHER = os.path.join(ROOT, "CCTransfert.pyw")
 def _env(tmp_path):
     env = dict(os.environ)
     env.update({"CCTRANSFERT_HOME": str(tmp_path / "home"), "CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"),
-                "CCT_NO_DIALOG": "1", "HOME": str(tmp_path)})
+                "CCT_NO_DIALOG": "1", "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)})
     env.pop("PYTHONPATH", None)
     return env
 

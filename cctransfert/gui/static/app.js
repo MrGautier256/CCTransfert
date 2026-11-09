@@ -234,6 +234,7 @@ function showTab(name) {
   document.querySelectorAll(".tabpanel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
   if (name === "history") loadJournals();
   if (name === "doctor" && !state.doctor) loadDoctor();
+  if (name === "settings") loadSettings();
 }
 
 // ===================================================================================
@@ -439,12 +440,63 @@ function renderDetail(s, det) {
       clear(result).append(h("div", { class: "note danger" }, e.message));
     }
   });
+  const dupBtn = h("button", { class: "btn", type: "button", title: "Créer une copie indépendante de cette session sur cette machine" }, "Dupliquer…");
+  dupBtn.onclick = () => duplicateDialog(s);
   const moveBtn = h("button", { class: "btn ghost", type: "button", title: "Rattacher cette session à un autre dossier de cette machine" }, "Déplacer vers un autre dossier…");
   moveBtn.onclick = () => relocate(s, moveBtn);
-  pane.append(h("div", { class: "actions" }, exportBtn, moveBtn));
+  pane.append(h("div", { class: "actions" }, exportBtn, dupBtn, moveBtn));
   pane.append(h("p", { class: "muted small mt10" },
     "Le transcript contient tout ce qui est passé dans la session (sorties de commandes, fichiers lus…), y compris d'éventuels secrets : transférez-le par un canal de confiance."));
   pane.append(result);
+}
+
+function defaultCopyTitle(t) {
+  return (t.length > 60 ? t.slice(0, 59) + "…" : t) + " (copie)";
+}
+
+function duplicateDialog(s) {
+  const dlg = $("#dup");
+  $("#dup-source").textContent = `Copie de « ${s.title} ». L'original n'est pas modifié ; la copie reçoit un nouvel ID et garde l'historique et le rewind.`;
+  $("#dup-title").value = defaultCopyTitle(s.title);
+  $("#dup-same").textContent = s.root || "?";
+  const target = $("#dup-target"), browseBtn = $("#dup-browse"), note = clear($("#dup-note"));
+  target.value = s.root ? s.root + "-copie" : "";
+  const radios = dlg.querySelectorAll("input[name=dup-where]");
+  radios[0].checked = true;
+  const sync = () => {
+    const other = radios[1].checked;
+    target.disabled = browseBtn.disabled = !other;
+    if (other) target.focus();
+  };
+  radios.forEach((r) => { r.onchange = sync; });
+  sync();
+  browseBtn.onclick = async () => {
+    const p = await pickPath({ mode: "dir", start: target.value || s.root, title: "Dossier du projet pour la copie" });
+    if (p) target.value = p;
+  };
+  if (s.running) note.append(h("div", { class: "note warn" }, "Session en cours : la copie s'arrêtera au dernier message enregistré."));
+  const ok = $("#dup-ok");
+  ok.onclick = () => busy(ok, async () => {
+    const title = $("#dup-title").value.trim();
+    if (!title) { clear(note).append(h("div", { class: "note danger" }, "Donnez un intitulé à la copie.")); return; }
+    const body = { id: s.id, title, target: radios[1].checked ? target.value.trim() : "" };
+    if (radios[1].checked && !body.target) { clear(note).append(h("div", { class: "note danger" }, "Indiquez le dossier de la copie.")); return; }
+    try {
+      const r = await api("/api/duplicate", { method: "POST", body });
+      dlg.close();
+      toast(`Copie créée : « ${title} »`);
+      state.details = {};
+      await loadSessions();
+      state.project = r.target_root;
+      renderProjectSelect();
+      renderList();
+      selectSession(r.new_id);
+    } catch (e) {
+      clear(note).append(h("div", { class: "note danger" }, e.message));
+    }
+  });
+  dlg.showModal();
+  $("#dup-title").select();
 }
 
 async function relocate(s, btn) {
@@ -620,6 +672,9 @@ function renderImport() {
     opt("new_id", "Copie indépendante (nouvel ID)", "À cocher pour importer sur une machine où la session existe déjà, sans toucher à l'original."),
     opt("replace", "Remplacer si elle existe déjà", "Aller-retour A → B → A : l'ancienne version est sauvegardée (annulable)."),
     opt("keep_mtime", "Garder les dates d'origine", "Par défaut la date du jour, pour échapper au nettoyage automatique des sessions de plus de 30 jours."),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Nouvel intitulé (facultatif)"),
+      h("input", { type: "text", value: imp.title || "", placeholder: s.title || "garder l'intitulé d'origine",
+        oninput: (e) => { imp.title = e.target.value; invalidatePreview(); } })),
     h("details", { open: imp.maps.length > 0 }, h("summary", {}, "Correspondances de chemins supplémentaires"),
       h("p", { class: "muted small" }, "Pour un autre dépôt cité dans la session, par exemple ~/Projets/MonProjet2 → ~/Travail/MonProjet2."), mapsBox)));
 
@@ -643,6 +698,7 @@ function importBody() {
   const imp = state.imp;
   return { path: state.bundle.path, target: imp.target, new_id: imp.new_id, replace: imp.replace,
     keep_mtime: imp.keep_mtime, maps: imp.maps.filter((p) => p[0].trim() && p[1].trim()),
+    title: (imp.title || "").trim() || undefined,
     new_sid: imp.new_id ? imp.preview_sid : undefined };
 }
 
@@ -856,6 +912,122 @@ async function loadDoctor() {
 }
 
 // ===================================================================================
+// Réglages : raccourcis et mises à jour
+// ===================================================================================
+async function loadSettings() {
+  const box = $("#settings");
+  let sc, upd;
+  try {
+    [sc, upd] = await Promise.all([api("/api/shortcuts"), api("/api/update")]);
+  } catch (e) { clear(box).append(h("div", { class: "note danger" }, e.message)); return; }
+  clear(box).append(h("h2", {}, "Réglages"), h("p", { class: "muted" }, "Raccourcis pour lancer CCTransfert, et mises à jour."));
+
+  // Raccourcis
+  const card = h("div", { class: "panel settings-card" }, h("h3", {}, "Raccourcis"));
+  if (!sc.supported) {
+    card.append(h("p", { class: "muted" }, "Non pris en charge sur ce système : lancez « CCTransfert gui »."));
+  } else {
+    const toggle = (key, label, hint, disabled) => h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: sc[key], disabled, onchange: async (e) => {
+        e.target.disabled = true;
+        try {
+          const r = await api("/api/shortcuts", { method: "POST", body: { [key]: e.target.checked } });
+          toast(e.target.checked ? "Raccourci ajouté" : "Raccourci retiré");
+          Object.assign(sc, r);
+        } catch (err) { toast(err.message, true); e.target.checked = !e.target.checked; }
+        e.target.disabled = false;
+      } }),
+      h("span", {}, h("span", { class: "lbl" }, label), h("span", { class: "hint" }, hint)));
+    card.append(
+      toggle("desktop", "Icône sur le bureau", sc.desktop_available ? "Double-clic pour ouvrir CCTransfert." : "Dossier du bureau introuvable.", !sc.desktop_available),
+      toggle("menu", "Raccourci dans le " + sc.menu_label, "Retrouvez CCTransfert en tapant son nom dans le " + sc.menu_label + ".", false));
+    if (sc.frozen) card.append(h("p", { class: "muted small" }, "CCTransfert est copié dans ", h("span", { class: "mono" }, sc.install_dir), " pour que les raccourcis restent valides même si le fichier téléchargé est supprimé."));
+  }
+  box.append(card);
+
+  // Mises à jour
+  const status = h("div", {});
+  const showStatus = (r) => {
+    clear(status);
+    if (r.error) status.append(h("div", { class: "note warn" }, r.error));
+    else if (r.available) status.append(updateNotice(r, true));
+    else if (r.latest) status.append(h("div", { class: "note ok" }, "✓ CCTransfert est à jour (dernière version : " + r.latest.version + ")."));
+  };
+  const checkBtn = h("button", { class: "btn", type: "button" }, "Vérifier maintenant");
+  checkBtn.onclick = () => busy(checkBtn, async () => {
+    try { showStatus(await api("/api/update?force=1")); } catch (e) { toast(e.message, true); }
+  });
+  box.append(h("div", { class: "panel settings-card" }, h("h3", {}, "Mises à jour"),
+    h("p", {}, "Version installée : ", h("strong", {}, upd.current), h("span", { class: "muted" }, " · " + upd.kind_label)),
+    h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: upd.auto_check, onchange: (e) =>
+        api("/api/update/settings", { method: "POST", body: { auto_check: e.target.checked } }).catch((err) => toast(err.message, true)) }),
+      h("span", {}, h("span", { class: "lbl" }, "Vérifier automatiquement au démarrage"),
+        h("span", { class: "hint" }, "Au plus une fois par jour, auprès de GitHub ; rien d'autre n'est envoyé."))),
+    h("div", { class: "actions" }, checkBtn), status));
+  if (upd.latest) showStatus(upd);
+}
+
+function notesBlock(latest) {
+  return latest.notes ? h("div", { class: "notes" }, latest.notes) : null;
+}
+
+function updateNotice(r, withNotes) {
+  const v = r.latest.version;
+  const box = h("div", { class: "note info" }, h("strong", {}, "Version " + v + " disponible"), " (vous avez " + r.current + ").");
+  if (r.can_auto) {
+    box.append(h("div", { class: "row mt8" }, h("button", { class: "btn primary small", type: "button", onclick: () => startUpdate(r) }, "Mettre à jour")));
+  } else if (r.instructions) {
+    box.append(h("div", { class: "cmd" }, h("code", {}, r.instructions), copyBtn(r.instructions)));
+  }
+  if (withNotes && r.latest.notes) box.append(h("details", {}, h("summary", {}, "Nouveautés"), notesBlock(r.latest)));
+  return box;
+}
+
+async function autoCheckUpdate() {
+  let r;
+  try { r = await api("/api/update"); } catch (e) { return; }
+  if (!r.available || r.skipped) return;
+  const b = clear($("#update-banner"));
+  const v = r.latest.version;
+  b.append(h("span", { class: "grow" }, h("strong", {}, "Une nouvelle version de CCTransfert est disponible : " + v), " (vous avez " + r.current + ")."),
+    h("button", { class: "btn small ghost", type: "button", onclick: () => confirmModal({
+      title: "Nouveautés de la version " + v, body: [notesBlock(r.latest) || "Aucune note de version."], ok: "Fermer", cancel: "Fermer" }) }, "Nouveautés"),
+    r.can_auto
+      ? h("button", { class: "btn small primary", type: "button", onclick: () => startUpdate(r) }, "Mettre à jour")
+      : h("button", { class: "btn small", type: "button", onclick: () => { showTab("settings"); } }, "Comment mettre à jour"),
+    h("button", { class: "btn small ghost", type: "button", onclick: () => { b.hidden = true; } }, "Plus tard"),
+    h("button", { class: "btn small ghost", type: "button", onclick: () => {
+      api("/api/update/skip", { method: "POST", body: { version: v } }).catch(() => {});
+      b.hidden = true;
+    } }, "Ignorer cette version"));
+  b.hidden = false;
+}
+
+async function startUpdate(r) {
+  const v = r.latest.version;
+  const ok = await confirmModal({
+    title: "Mettre à jour vers la version " + v + " ?",
+    body: ["CCTransfert va télécharger la version " + v + ", vérifier son empreinte (sha256), puis redémarrer. Vos sessions et vos réglages ne sont pas touchés.", notesBlock(r.latest)].filter(Boolean),
+    ok: "Mettre à jour",
+  });
+  if (!ok) return;
+  const b = clear($("#update-banner"));
+  b.append(h("span", { class: "spinner" }), " Téléchargement et installation de la version " + v + "…");
+  b.hidden = false;
+  try {
+    await api("/api/update/apply", { method: "POST" });
+    document.body.textContent = "";
+    document.body.append(h("div", { class: "empty big" }, h("div", { class: "empty-icon" }, "✓"),
+      h("p", {}, "Version " + v + " installée."), h("p", { class: "muted" }, "CCTransfert redémarre dans une nouvelle fenêtre ; celle-ci va se fermer.")));
+    setTimeout(() => window.close(), 5000);
+  } catch (e) {
+    clear(b).append(h("span", { class: "grow" }, "Mise à jour impossible : " + e.message),
+      h("button", { class: "btn small ghost", type: "button", onclick: () => { b.hidden = true; } }, "Fermer"));
+  }
+}
+
+// ===================================================================================
 // Démarrage
 // ===================================================================================
 function heartbeat() {
@@ -898,6 +1070,7 @@ async function init() {
   $("#machine").textContent = `${i.user}@${i.hostname} · ${i.os}${i.wsl ? " (WSL)" : ""} · Claude Code ${i.claude_version || "?"}`;
   $("#machine").title = "Config : " + i.config_dir;
   await loadSessions();
+  autoCheckUpdate();
   const toOpen = OPEN_PATH || i.preload;
   if (toOpen) {
     showTab("import");
